@@ -1,6 +1,6 @@
 package org.blbulyandavbulyan.filescanner.cli.task;
 
-import org.blbulyandavbulyan.filescanner.cli.services.DirectoryContentService;
+import org.blbulyandavbulyan.filescanner.cli.service.DirectoryContentService;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;

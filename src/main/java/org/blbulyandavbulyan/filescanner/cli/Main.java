@@ -1,7 +1,7 @@
 package org.blbulyandavbulyan.filescanner.cli;
 
 import lombok.extern.java.Log;
-import org.blbulyandavbulyan.filescanner.cli.services.DirectoryContentService;
+import org.blbulyandavbulyan.filescanner.cli.service.DirectoryContentService;
 import org.blbulyandavbulyan.filescanner.cli.task.FolderProcessingTask;
 
 import java.nio.file.Path;

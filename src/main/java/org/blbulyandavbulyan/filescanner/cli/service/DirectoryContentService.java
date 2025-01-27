@@ -1,4 +1,4 @@
-package org.blbulyandavbulyan.filescanner.cli.services;
+package org.blbulyandavbulyan.filescanner.cli.service;
 
 import java.io.IOException;
 import java.nio.file.Files;

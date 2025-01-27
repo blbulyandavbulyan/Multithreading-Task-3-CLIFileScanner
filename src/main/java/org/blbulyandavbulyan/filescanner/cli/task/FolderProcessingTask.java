@@ -2,7 +2,7 @@ package org.blbulyandavbulyan.filescanner.cli.task;
 
 import lombok.Getter;
 import lombok.extern.java.Log;
-import org.blbulyandavbulyan.filescanner.cli.services.DirectoryContentService;
+import org.blbulyandavbulyan.filescanner.cli.service.DirectoryContentService;
 
 import java.io.IOException;
 import java.math.BigInteger;
