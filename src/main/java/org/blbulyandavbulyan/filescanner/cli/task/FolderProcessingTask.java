@@ -13,15 +13,19 @@ import java.util.Optional;
 import java.util.concurrent.RecursiveTask;
 import java.util.logging.Level;
 
+/**
+ * Task which will calculate files sizes, files and folders count
+ * If IOException occurred, it will ignore it, just write it to log as warning and then use default value
+ */
 @Log
-public class FolderProcessingTask extends RecursiveTask<Optional<Statistics>> {
+public class FolderProcessingTask extends RecursiveTask<Optional<FolderStatistics>> {
     @Getter
     private final Path pathToProcessingDirectory;
     private final DirectoryContentService directoryContentService;
 
     public FolderProcessingTask(Path pathToProcessingDirectory, DirectoryContentService directoryContentService) {
         if (!Files.isDirectory(pathToProcessingDirectory)) {
-            throw new IllegalArgumentException("The specified path %s should point to a directory" + pathToProcessingDirectory);
+            throw new IllegalArgumentException("The specified path %s should point to a directory".formatted(pathToProcessingDirectory));
         }
         this.pathToProcessingDirectory = pathToProcessingDirectory;
         this.directoryContentService = directoryContentService;
@@ -29,39 +33,43 @@ public class FolderProcessingTask extends RecursiveTask<Optional<Statistics>> {
 
 
     @Override
-    protected Optional<Statistics> compute() {
+    protected Optional<FolderStatistics> compute() {
         log.info(() -> "Starting to process " + pathToProcessingDirectory);
+        FolderStatistics folderStatistics = new FolderStatistics();
+        List<Path> files;
+        List<FolderProcessingTask> subdirectoryTasks;
         try {
-            Statistics statistics = new Statistics();
-            List<Path> files;
-            List<FolderProcessingTask> subdirectoryTasks;
-            {
-                final var directoryContent = directoryContentService.getDirectoryContent(pathToProcessingDirectory);
-                statistics.setDirectoriesCount(BigInteger.valueOf(directoryContent.directories().size()));
-                subdirectoryTasks = createTasksForSubdirectories(directoryContent.directories());
-                files = directoryContent.files();
-            }
-            BigInteger filesCount = BigInteger.valueOf(files.size());
-            log.finest(()-> "Found %s files in %s".formatted(filesCount, pathToProcessingDirectory));
-            BigInteger totalFilesSize = calculateFileSizes(files);
-            statistics.setTotalSize(totalFilesSize);
-            statistics.setFilesCount(filesCount);
-            long countOfProcessedDirectories = 0;
-            int size = subdirectoryTasks.size();
-            for (final var task : subdirectoryTasks) {
-                long finalCountOfProcessedDirectories = countOfProcessedDirectories;
-                log.info(()-> "%d/%d directories remaining to finish processing of %s".formatted(finalCountOfProcessedDirectories, size, pathToProcessingDirectory));
-                log.finest(() -> "Waiting for subdirectory %s to finish".formatted(task.getPathToProcessingDirectory()));
-                task.join().ifPresent(statistics::add);
-                countOfProcessedDirectories++;
-            }
-
-            log.info("Finished processing " + pathToProcessingDirectory);
-            return Optional.of(statistics);
+            final var directoryContent = directoryContentService.getDirectoryContent(pathToProcessingDirectory);
+            folderStatistics.setDirectoriesCount(BigInteger.valueOf(directoryContent.directories().size()));
+            subdirectoryTasks = createTasksForSubdirectories(directoryContent.directories());
+            files = directoryContent.files();
         } catch (IOException e) {
+            //in case of error related to reading the directory, we just ignore this directory and don't add it to the result
             log.log(Level.WARNING, "Failed to process " + pathToProcessingDirectory, e);
             return Optional.empty();
         }
+        BigInteger filesCount = BigInteger.valueOf(files.size());
+        log.finest(() -> "Found %s files in %s".formatted(filesCount, pathToProcessingDirectory));
+        folderStatistics.setTotalFilesSize(calculateFileSizesIgnoringErrors(files));
+        folderStatistics.setFilesCount(filesCount);
+        folderStatistics.add(joinSubdirectoriesTasks(subdirectoryTasks));
+        log.info(() -> "Finished processing " + pathToProcessingDirectory);
+        return Optional.of(folderStatistics);
+    }
+
+    private FolderStatistics joinSubdirectoriesTasks(List<FolderProcessingTask> subdirectoryTasks) {
+        FolderStatistics folderStatistics = new FolderStatistics();
+        long countOfProcessedDirectories = 0;
+        int size = subdirectoryTasks.size();
+        for (final var task : subdirectoryTasks) {
+            long finalCountOfProcessedDirectories = countOfProcessedDirectories;
+            log.info(() -> "%d/%d directories remaining to finish processing of %s"
+                    .formatted(finalCountOfProcessedDirectories, size, pathToProcessingDirectory));
+            log.finest(() -> "Waiting for subdirectory %s to finish".formatted(task.getPathToProcessingDirectory()));
+            task.join().ifPresent(folderStatistics::add);
+            countOfProcessedDirectories++;
+        }
+        return folderStatistics;
     }
 
     private List<FolderProcessingTask> createTasksForSubdirectories(List<Path> directories) {
@@ -69,26 +77,22 @@ public class FolderProcessingTask extends RecursiveTask<Optional<Statistics>> {
                 .stream()
                 .map(directory -> new FolderProcessingTask(directory, directoryContentService))
                 .map(FolderProcessingTask::fork)
-                .map(FolderProcessingTask.class::cast)
+                .map(FolderProcessingTask.class::cast)//casting because fork returns ForkJoinTask
                 .toList();
     }
 
-    private BigInteger calculateFileSizes(List<Path> files) {
+    private BigInteger calculateFileSizesIgnoringErrors(List<Path> files) {
         log.finest(() -> "Calculating sizes of files in " + pathToProcessingDirectory);
         BigInteger result = BigInteger.ZERO;
         for (Path file : files) {
-            result = result.add(BigInteger.valueOf(getFileSizeOrLogError(file)));
+            try {
+                result = result.add(BigInteger.valueOf(Files.size(file)));
+            } catch (IOException e) {
+                //we saw nothing, ignore the file and move on
+                log.log(Level.WARNING, e, () -> "Failed to get size for file " + file);
+            }
         }
         log.finest(() -> "Finished calculating sizes of files in " + pathToProcessingDirectory);
         return result;
-    }
-
-    private static long getFileSizeOrLogError(Path file) {
-        try {
-            return Files.size(file);
-        } catch (IOException e) {
-            log.log(Level.WARNING, "Failed to get size for file " + file, e);
-            return 0;
-        }
     }
 }
